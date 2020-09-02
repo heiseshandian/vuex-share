@@ -4,70 +4,32 @@
 
 ### vuex 踩坑记录
 
-#### 重复注册模块导致 action 触发多次
+#### 使用 `registerModule` 多次注册同一模块会导致后面再调用此模块下的 `action` 时连续触发多次
 
-- 根模块
-  简便起见，我们的根状态只有个空对象
-
-```ts
-// store.ts
+```js
 import Vue from "vue";
 import Vuex from "vuex";
 
 Vue.use(Vuex);
 
-export default new Vuex.Store({
-  state: {},
-});
-```
+// 根模块
+const store = new Vuex.Store({});
 
-- 子模块 a
-  我们在子模块里面定义一个 action
-
-```ts
-// module-a.ts
-export const moduleA = {
-  namespaced: true,
-  state: { countA: 1 },
+// 子模块-简便起见我们这里只定义个actions
+const moduleA = {
   actions: {
-    // 这里我们定义了一个action，action被调用的时候会在控制台打印一条日志
-    inc({ commit, state }) {
+    inc() {
       console.log("i was called");
-      commit("UPDATE_COUNT", state.countA + 1);
-    },
-  },
-  mutations: {
-    UPDATE_COUNT(state, payload) {
-      state.countA = payload;
     },
   },
 };
-```
 
-- App.vue
+// 多次注册子模块
+store.registerModule("moduleA", moduleA);
+store.registerModule("moduleA", moduleA);
 
-```html
-<script lang="ts">
-  import { Component, Vue } from "vue-property-decorator";
-  import { createNamespacedHelpers } from "vuex";
-  import store from "./store";
-  import { moduleA } from "./module-a";
-
-  // 注册两次 moduleA
-  store.registerModule("moduleA", moduleA);
-  store.registerModule("moduleA", moduleA);
-  const { mapActions } = createNamespacedHelpers("moduleA");
-
-  @Component
-  export default class App extends Vue {
-    inc = mapActions(["inc"]).inc;
-
-    created() {
-      // 此处会调用两次我们在module-a中定义的 action
-      this.inc();
-    }
-  }
-</script>
+// 调用一次 action
+store.dispatch("inc");
 ```
 
 ```sh
@@ -75,13 +37,16 @@ i was called
 i was called
 ```
 
-### 如何实现个简化版的 vuex
+### vuex(3.5.1) 源码解读
 
-抛开上面的问题，如果让我们来实现个精简版的 vuex，只有 state，没有 getters,actions,mutations 这些东西
+#### 为什么要看 vuex 源码？
 
-### vuex 源码解读
+- 非常简短，看起来不费劲
+- 业务上的特殊使用场景导致一些奇怪的 bug，不了解内部实现可能无法从根本上解决问题
 
 #### install
+
+通过 `global mixin` 的形式往每个 `vue` 实例下都挂个 `$store` 属性，这样就可以在每个 `vue` 组件里面通过 `this.$store` 访问 `vuex`，这么做主要是为了避免每次使用 `vuex` 都需要手动 `import` store。
 
 ```js
 Vue.mixin({ beforeCreate: vuexInit });
