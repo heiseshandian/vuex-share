@@ -10,12 +10,13 @@ export const moduleA: Module<ModuleA, unknown> = {
   },
   actions: {
     inc({ state: { countA }, commit }) {
-      console.log("i was called");
+      console.log("i was called actions");
       commit("UPDATE_COUNT", countA + 1);
     }
   },
   mutations: {
     UPDATE_COUNT(state, payload) {
+      console.log("i was called mutations");
       state.countA = payload;
     }
   }

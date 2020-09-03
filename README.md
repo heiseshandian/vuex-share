@@ -56,9 +56,9 @@ function registerAction(store, type, handler, local) {
 }
 ```
 
-这里的 action 之所以是数组是 vuex 作者考虑到可能不同的模块需要对某一 action 做出响应，也就是说默认情况下不同模块的 action 是可以重名的，且默认注册在根命名空间下。比如说我们有个应用的不同页面被分成不同模块，然后用户切换账号的时候我们需要将不同页面上展示的资源都刷新掉，这时候就可以注册个名字叫做 refreshResource 的 action，各个模块可以实现自己的定制刷新逻辑，然后一次触发全部刷新。（默认情况下 mutation 也是注册在根命名空间下的），当然，也可以为 module 添加 namespaced 属性控制 vuex 不要将 action 和 mutation 注册在根命名空间下。
+这里的 action 之所以是数组是 vuex 作者考虑到可能不同的模块需要对某一 action 做出响应，也就是说默认情况下不同模块的 action 是可以重名的，且默认注册在根命名空间下。比如说我们有个应用的不同页面被分成不同模块，然后用户切换账号的时候我们需要将不同页面上展示的资源都刷新掉，这时候就可以注册个名字叫做 refreshResource 的 action，各个模块可以实现自己的定制刷新逻辑，然后一次触发全部刷新（mutation 默认也是注册在根命名空间下）。当然，也可以为 module 添加 namespaced 属性控制 vuex 不要将 action 注册在根命名空间下。
 
-添加了 namespaced 属性的模块可以在 action 中添加 root 属性将 action 注册在根命名空间下
+添加了 namespaced 属性的模块可以在 action 中添加 root 属性将 action 和 mutation 注册在根命名空间下
 
 ```js
 const moduleA = {
@@ -66,10 +66,31 @@ const moduleA = {
   actions: {
     foo: {
       root: true,
-      handler (namespacedContext, payload) { ... }
+      handler(namespacedContext, payload) {
+        // ...
+      },
     },
   },
 };
+```
+
+那我们如何避免模块重复注册的问题呢？思路其实也挺简单的，那就是我们在注册模块前先判断下模块是否已经注册过，如果已经注册过就不再注册了
+
+```js
+const store = new Vuex.Store({
+  // ...
+});
+rewriteRegisterModule(store);
+
+function rewriteRegisterModule(store) {
+  const original = store.registerModule;
+  store.registerModule = function(path, ...rest) {
+    if (store.hasModule(path)) {
+      return;
+    }
+    original.call(store, path, ...rest);
+  };
+}
 ```
 
 ### 如何实现一个精简版 vuex？
@@ -118,7 +139,9 @@ const store = {
 当然，上面的模式还有个问题就是每个组件都需要手动引入 store，使用体验可能不是很好，我们期望可以像 vuex 一样只注册一次，然后在每个 vue 组件中都可以使用。借助全局 mixin 的方式我们可以轻松实现类似功能。
 
 ```js
-const store={...};
+const store = {
+  // ...
+};
 
 Vue.mixin({
   beforeCreate() {
@@ -166,7 +189,7 @@ export default {
 
 #### install
 
-通过 global mixin 的形式往每个 vue 实例下都挂个 $store 属性，这样就可以在每个 vue 组件里面通过 this.$store 访问 vuex，这么做主要是为了避免每次使用 vuex 都需要手动 import store。
+通过 global mixin 的形式往每个 vue 实例下都挂个 \$store 属性，这样就可以在每个 vue 组件里面通过 this.\$store 访问 vuex，这么做主要是为了避免每次使用 vuex 都需要手动 import store from '...'。
 
 ```js
 Vue.mixin({ beforeCreate: vuexInit });
@@ -185,12 +208,81 @@ function vuexInit() {
 
 #### state & getter
 
+从 Store 构造函数开始看，暂时忽略掉不需要关心的逻辑，state 和 getter 初始化步骤如下，我们可以看到 vuex 内部其实是用了一个 vue 实例来让 state 具备响应式，vuex 中的 getters 其实就是计算属性。
+
+```js
+const computed = {};
+forEachValue(wrappedGetters, (fn, key) => {
+  computed[key] = () => fn(store);
+  Object.defineProperty(store.getters, key, {
+    get: () => store._vm[key],
+    enumerable: true, // for local getters
+  });
+});
+
+store._vm = new Vue({
+  data: {
+    $$state: state,
+  },
+  computed,
+});
+```
+
 #### mutation
+
+从 Store 构造函数开始看，忽略掉不需要关心的细节。可以看出 vuex 给 mutation 注入了两个参数，一个是当前模块的状态，另一个是传参。这样我们就能在 mutation 中改变当前模块的状态了。
+
+```js
+module.forEachMutation((mutation, key) => {
+  const namespacedType = namespace + key;
+  registerMutation(store, namespacedType, mutation, local);
+});
+
+function registerMutation(store, type, handler, local) {
+  const entry = store._mutations[type] || (store._mutations[type] = []);
+  entry.push(function wrappedMutationHandler(payload) {
+    handler.call(store, local.state, payload);
+  });
+}
+```
 
 #### action
 
-#### module
+从 Store 构造函数开始看，忽略掉不需要关心的细节。可以看出 vuex 给 action 注入了两个参数，第一个包含 commit，dispatch，这让我们在 action 中可以改变状态以及触发其他 action，第一个参数里面还包含当前模块以及根模块的状态和计算属性；第二个则是用户传入的参数。从这里我们也可以发现对于 action 而言只接受一个 payload 入参，如果我们需要传入多个参数的话只能通过对象的形式传入，传入多个参数是无效的~
 
-#### namespace
+```js
+module.forEachAction((action, key) => {
+  const type = action.root ? key : namespace + key;
+  const handler = action.handler || action;
+  registerAction(store, type, handler, local);
+});
 
-#### mapState,mapMutations,mapGetters,mapActions
+function registerAction(store, type, handler, local) {
+  const entry = store._actions[type] || (store._actions[type] = []);
+  entry.push(function wrappedActionHandler(payload) {
+    let res = handler.call(
+      store,
+      {
+        dispatch: local.dispatch,
+        commit: local.commit,
+        getters: local.getters,
+        state: local.state,
+        rootGetters: store.getters,
+        rootState: store.state,
+      },
+      payload
+    );
+    if (!isPromise(res)) {
+      res = Promise.resolve(res);
+    }
+    if (store._devtoolHook) {
+      return res.catch((err) => {
+        store._devtoolHook.emit("vuex:error", err);
+        throw err;
+      });
+    } else {
+      return res;
+    }
+  });
+}
+```

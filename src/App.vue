@@ -36,7 +36,7 @@ export default class App extends Vue {
   }
 
   mounted() {
-    store.setMessageAction("just for test");
+    this.$store.commit("UPDATE_COUNT", 1);
   }
 }
 </script>
