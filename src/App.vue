@@ -4,9 +4,42 @@
       <router-link to="/">Home</router-link> |
       <router-link to="/about">About</router-link>
     </div>
+    <div>{{ message }}</div>
     <router-view />
   </div>
 </template>
+
+<script lang="ts">
+import { Component, Vue } from "vue-property-decorator";
+
+const store = {
+  debug: true,
+  state: {
+    message: "Hello!"
+  },
+  setMessageAction(newValue: string) {
+    if (this.debug) console.log("setMessageAction triggered with", newValue);
+    this.state.message = newValue;
+  },
+  clearMessageAction() {
+    if (this.debug) console.log("clearMessageAction triggered");
+    this.state.message = "";
+  }
+};
+
+Vue.observable(store.state);
+
+@Component
+export default class App extends Vue {
+  get message() {
+    return store.state.message;
+  }
+
+  mounted() {
+    store.setMessageAction("just for test");
+  }
+}
+</script>
 
 <style lang="less">
 #app {
